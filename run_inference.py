@@ -519,7 +519,7 @@ def process_image(job):
         job_input = job["input"]
         x = job_input["x"]
         y = job_input["y"]
-        image_buffer = job_input["image_buffer"]
+        image_buffer = job_input["Image_buffer"]
         
         # Add error checking for Image_buffer
         if not image_buffer:
