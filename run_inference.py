@@ -566,7 +566,7 @@ def process_image(job):
         final_df = explain.generate_results_mpp()
         
         # Convert DataFrame to dictionary for JSON serialization
-        result = final_df.to_dict(orient='records')
+        result = final_df.to_json(orient='records')
         
         return result
     except Exception as e:
