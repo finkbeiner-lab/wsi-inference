@@ -419,10 +419,10 @@ class ExplainPredictions():
             
             #qupath_coord_x = self.x +img_x +  (y1 + y2)//2
             
-            qupath_coord_x1 = self.x +img_x +  y1
-            qupath_coord_x2 = self.x +img_x +  y2
-            qupath_coord_y1 = self.y + img_y + x1
-            qupath_coord_y2 = self.y + img_y + x2
+            qupath_coord_x1 = self.x + int(img_x) + y1
+            qupath_coord_x2 = self.x + int(img_x) + y2
+            qupath_coord_y1 = self.y + int(img_y) + x1
+            qupath_coord_y2 = self.y + int(img_y)  + x2
             
             #qupath_coord_y = self.y + img_y + (x1 + x2)//2
 
@@ -542,7 +542,7 @@ def process_image(job):
         if height != 1024 or width != 1024:
             raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 1024x1024.")
         
-        model_name = os.path.abspath("/workspace/Projects/Amyb_plaque_detection/models/yp2mf3i8_epoch=108-step=872.ckpt")
+        model_name = os.path.abspath("/runpod-volume/Projects/Amyb_plaque_detection/models/yp2mf3i8_epoch=108-step=872.ckpt")
         #model_name = "/gladstone/finkbeiner/steve/work/data/npsad_data/vivek/runpod_mrcnn_models/yp2mf3i8_epoch=108-step=872.ckpt"
         model = LitMaskRCNN.load_from_checkpoint(model_name)
         

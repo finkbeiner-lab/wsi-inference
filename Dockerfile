@@ -1,4 +1,4 @@
-# Use a base image that already has CUDA and PyTorch installed
+#Use a base image that already has CUDA and PyTorch installed
 FROM runpod/pytorch:2.0.1-py3.10-cuda11.8.0-devel-ubuntu22.04
 
 # Metadata as key-value pairs
@@ -28,6 +28,7 @@ RUN git clone https://github.com/finkbeiner-lab/wsi-inference.git
 
 # Change the working directory to wsi-inference
 WORKDIR /workspace/Projects/wsi-inference
+RUN git pull origin main
 
 # Install dependencies from requirements.txt
 RUN /bin/bash -c "source /root/miniconda3/bin/activate gpu"
@@ -40,7 +41,7 @@ RUN pip install pytorch_lightning==2.0.1
 RUN pip install pandas
 
 
-# Call your file when your container starts
+# # Call your file when your container starts
 CMD [ "python", "-u", "run_inference.py" ]
 
 
