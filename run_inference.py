@@ -519,25 +519,25 @@ def process_image(job):
         job_input = job["input"]
         x = job_input["x"]
         y = job_input["y"]
-        Image_buffer = job_input["image_buffer"]
+        image_buffer = job_input["image_buffer"]
         
         # Add error checking for Image_buffer
-        if not Image_buffer:
-            raise ValueError("Image_buffer is empty")
+        if not image_buffer:
+            raise ValueError("image_buffer is empty")
         
         # Decode base64 Image_buffer
-        decoded_image = base64.b64decode(Image_buffer)
+        decoded_image = base64.b64decode(image_buffer)
         image = Image.open(io.BytesIO(decoded_image))
-        Image_buffer = np.array(image)
+        image_buffer = np.array(image)
         
         # Add error checking for decoded image
         if Image_buffer.size == 0:
             raise ValueError("Decoded Image buffer is empty")
         
-        if len(Image_buffer.shape) != 3:
-            raise ValueError(f"Invalid image shape: {Image_buffer.shape}. Expected 3 dimensions.")
+        if len(image_buffer.shape) != 3:
+            raise ValueError(f"Invalid image shape: {image_buffer.shape}. Expected 3 dimensions.")
         
-        height, width, channels = Image_buffer.shape 
+        height, width, channels = image_buffer.shape 
         if height != 3072 or width != 3072:
             raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 3072x3072.")
         
@@ -545,7 +545,7 @@ def process_image(job):
         #model_name = "/gladstone/finkbeiner/steve/work/data/npsad_data/vivek/runpod_mrcnn_models/yp2mf3i8_epoch=108-step=872.ckpt"
         model = LitMaskRCNN.load_from_checkpoint(model_name)
         
-        explain = ExplainPredictions(model, x, y, Image_buffer, detection_threshold=0.6)
+        explain = ExplainPredictions(model, x, y, image_buffer, detection_threshold=0.6)
         final_df = explain.generate_results_mpp()
         
         # Convert DataFrame to dictionary for JSON serialization
@@ -562,7 +562,7 @@ def process_image(job):
         model_name = "/gladstone/finkbeiner/steve/work/data/npsad_data/vivek/runpod_mrcnn_models/yp2mf3i8_epoch=108-step=872.ckpt" 
         model = LitMaskRCNN.load_from_checkpoint(model_name)
         
-        explain = ExplainPredictions(model, x, y, Image_buffer, detection_threshold=0.6)
+        explain = ExplainPredictions(model, x, y, image_buffer, detection_threshold=0.6)
         final_df = explain.generate_results_mpp()
         
         # Convert DataFrame to dictionary for JSON serialization
