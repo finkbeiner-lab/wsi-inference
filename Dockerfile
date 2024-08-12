@@ -39,6 +39,7 @@ RUN pip install opencv-python
 RUN pip install tqdm
 RUN pip install pytorch_lightning==2.0.1
 RUN pip install pandas
+RUN pip install matplotlib
 
 
 # # Call your file when your container starts
