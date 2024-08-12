@@ -9,7 +9,7 @@ import pandas as pd
 from skimage.measure import regionprops
 from skimage.color import rgb2hed, hed2rgb
 from torch.utils.data import Dataset, DataLoader
-import lightning as L
+import pytorch_lightning as L
 from collections import OrderedDict
 from torch import Tensor
 import warnings
