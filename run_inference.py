@@ -538,7 +538,7 @@ def process_image(job):
             raise ValueError(f"Invalid image shape: {image_buffer.shape}. Expected 3 dimensions.")
         
         height, width, channels = image_buffer.shape 
-        if height != 3072 or width != 3072:
+        if height != 1024 or width != 1024:
             raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 3072x3072.")
         
         model_name = "/workspace/Projects/Amyb_plaque_detection/models/yp2mf3i8_epoch=108-step=872.ckpt"
