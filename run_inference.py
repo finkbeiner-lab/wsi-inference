@@ -318,11 +318,11 @@ class LitMaskRCNN(L.LightningModule):
 
 class ExplainPredictions():
     # TODO fix the visualization flags
-    def __init__(self, model, x, y, Image_buffer, detection_threshold):
+    def __init__(self, model, x, y, image_buffer, detection_threshold):
         self.model = model
         self.x = x
         self.y = y
-        self.Image_buffer = Image_buffer
+        self.image_buffer = image_buffer
         self.detection_threshold = detection_threshold
         self.class_names = ['Cored', 'Diffuse', 'Coarse-Grained', 'CAA']
         self.class_to_colors = {'Cored': (255, 0, 0), 'Diffuse' : (0, 0, 255), 'Coarse-Grained': (0,255,0), 'CAA':(225, 255, 0)}
@@ -469,7 +469,7 @@ class ExplainPredictions():
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model.eval().to(device)
         
-        image = np.array(self.Image_buffer)
+        image = np.array(self.image_buffer)
         
         # Add error checking for image
         if image.size == 0:
@@ -525,13 +525,13 @@ def process_image(job):
         if not image_buffer:
             raise ValueError("image_buffer is empty")
         
-        # Decode base64 Image_buffer
+        # Decode base64 image_buffer
         decoded_image = base64.b64decode(image_buffer)
         image = Image.open(io.BytesIO(decoded_image))
         image_buffer = np.array(image)
         
         # Add error checking for decoded image
-        if Image_buffer.size == 0:
+        if image_buffer.size == 0:
             raise ValueError("Decoded Image buffer is empty")
         
         if len(image_buffer.shape) != 3:
