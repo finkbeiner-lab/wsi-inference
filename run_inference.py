@@ -1,4 +1,3 @@
-oc
 import os
 import runpod
 import sys
