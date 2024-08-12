@@ -1,3 +1,5 @@
+
+import os
 import runpod
 import sys
 sys.path.insert(0, '../')
@@ -541,7 +543,7 @@ def process_image(job):
         if height != 1024 or width != 1024:
             raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 1024x1024.")
         
-        model_name = "/workspace/Projects/Amyb_plaque_detection/models/yp2mf3i8_epoch=108-step=872.ckpt"
+        model_name = os.path.join("/workspace/Projects/Amyb_plaque_detection/models/yp2mf3i8_epoch=108-step=872.ckpt")
         #model_name = "/gladstone/finkbeiner/steve/work/data/npsad_data/vivek/runpod_mrcnn_models/yp2mf3i8_epoch=108-step=872.ckpt"
         model = LitMaskRCNN.load_from_checkpoint(model_name)
         
