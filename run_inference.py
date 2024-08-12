@@ -479,8 +479,8 @@ class ExplainPredictions():
             raise ValueError(f"Invalid image shape: {image.shape}. Expected 3 dimensions.")
         
         height, width, channels = image.shape 
-        if height != 3072 or width != 3072:
-            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 3072x3072.")
+        if height != 1024 or width != 1024:
+            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 1024x1024.")
         
         # Tile size
         tile_size = 1024
@@ -539,7 +539,7 @@ def process_image(job):
         
         height, width, channels = image_buffer.shape 
         if height != 1024 or width != 1024:
-            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 3072x3072.")
+            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 1024x1024.")
         
         model_name = "/workspace/Projects/Amyb_plaque_detection/models/yp2mf3i8_epoch=108-step=872.ckpt"
         #model_name = "/gladstone/finkbeiner/steve/work/data/npsad_data/vivek/runpod_mrcnn_models/yp2mf3i8_epoch=108-step=872.ckpt"
@@ -556,8 +556,8 @@ def process_image(job):
         import traceback
         error_message = f"Error in process_image: {str(e)}\n{traceback.format_exc()}"
         return {"error": error_message}
-        if height != 3072 or width != 3072:
-            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 3072x3072.")
+        if height != 1024 or width != 1024:
+            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 1024x1024.")
 
         model_name = "/gladstone/finkbeiner/steve/work/data/npsad_data/vivek/runpod_mrcnn_models/yp2mf3i8_epoch=108-step=872.ckpt" 
         model = LitMaskRCNN.load_from_checkpoint(model_name)
