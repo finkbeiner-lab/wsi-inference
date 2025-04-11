@@ -40,7 +40,10 @@ RUN pip install tqdm
 RUN pip install pytorch_lightning==2.0.1
 RUN pip install pandas
 RUN pip install matplotlib
+<<<<<<< HEAD
 RUN pip install huggingface_hub
+=======
+>>>>>>> 46b9da2a030cb15963a8d1da6c35f7697e181b8e
 
 
 # # Call your file when your container starts

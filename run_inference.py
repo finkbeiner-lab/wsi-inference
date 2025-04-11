@@ -542,10 +542,14 @@ class ExplainPredictions():
             regions = regionprops(closing)
             mask_present = 1 if 0 in np.unique(closing) else 0
             
+            #qupath_coord_x = self.x +img_x +  (y1 + y2)//2
+            
             qupath_coord_x1 = self.x + int(img_x) + y1
             qupath_coord_x2 = self.x + int(img_x) + y2
             qupath_coord_y1 = self.y + int(img_y) + x1
             qupath_coord_y2 = self.y + int(img_y)  + x2
+            
+            #qupath_coord_y = self.y + img_y + (x1 + x2)//2
 
             for props in regions:
                 plaque_counts[label] += 1
