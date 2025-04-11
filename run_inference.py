@@ -542,22 +542,53 @@ class ExplainPredictions():
             regions = regionprops(closing)
             mask_present = 1 if 0 in np.unique(closing) else 0
             
-            #qupath_coord_x = self.x +img_x +  (y1 + y2)//2
+            # Find contours of the mask blob
+            contours, _ = cv2.findContours(closing, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Get polygon coordinates for each contour
+            polygon_coords = []
+            for contour in contours:
+                # Simplify the contour to get polygon vertices
+                epsilon = 0.02 * cv2.arcLength(contour, True)
+                approx = cv2.approxPolyDP(contour, epsilon, True)
+                
+                # Convert coordinates to list format and adjust for global coordinates
+                coords = []
+                for point in approx:
+                    x, y = point[0]
+                    # Adjust coordinates to global image space
+                    global_x = self.x + int(img_x) + y1 + x
+                    global_y = self.y + int(img_y) + x1 + y
+                    coords.append([global_x, global_y])
+                polygon_coords.append(coords)
             
             qupath_coord_x1 = self.x + int(img_x) + y1
             qupath_coord_x2 = self.x + int(img_x) + y2
             qupath_coord_y1 = self.y + int(img_y) + x1
             qupath_coord_y2 = self.y + int(img_y)  + x2
-            
-            #qupath_coord_y = self.y + img_y + (x1 + x2)//2
 
             for props in regions:
                 plaque_counts[label] += 1
-                data_record = { 'image_name': img_name,  'label': label, 'confidence': scores[i], 'brown_pixels': total_brown_pixels, 'core': plaque_counts["Cored"], 
-                    'coarse_grained': plaque_counts["Coarse-Grained"], 'diffuse': plaque_counts["Diffuse"], 'caa': plaque_counts["CAA"], 'centroid': props.centroid, 
-                    'eccentricity': props.eccentricity,  'area': props.area,  'equivalent_diameter': props.equivalent_diameter, 'mask_present': mask_present,
-                    'qupath_coord_x1':qupath_coord_x1,'qupath_coord_x2':qupath_coord_x2,  'qupath_coord_y1':qupath_coord_y1,
-                    'qupath_coord_y2':qupath_coord_y2}
+                data_record = { 
+                    'image_name': img_name,  
+                    'label': label, 
+                    'confidence': scores[i], 
+                    'brown_pixels': total_brown_pixels, 
+                    'core': plaque_counts["Cored"], 
+                    'coarse_grained': plaque_counts["Coarse-Grained"], 
+                    'diffuse': plaque_counts["Diffuse"], 
+                    'caa': plaque_counts["CAA"], 
+                    'centroid': props.centroid, 
+                    'eccentricity': props.eccentricity,  
+                    'area': props.area,  
+                    'equivalent_diameter': props.equivalent_diameter, 
+                    'mask_present': mask_present,
+                    'qupath_coord_x1': qupath_coord_x1,
+                    'qupath_coord_x2': qupath_coord_x2,  
+                    'qupath_coord_y1': qupath_coord_y1,
+                    'qupath_coord_y2': qupath_coord_y2,
+                    'polygon_coordinates': polygon_coords  # Add polygon coordinates to the record
+                }
                 df = pd.concat([df, pd.DataFrame.from_records([data_record])], ignore_index=True)
 
         return df
