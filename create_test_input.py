@@ -1,12 +1,11 @@
 from PIL import Image
-import numpy as np
 import base64
 from io import BytesIO
 import json
 
-# Create a random image of size 3072x3072
-image_array = np.random.randint(0, 255, (3072, 3072, 3), dtype=np.uint8)
-image = Image.fromarray(image_array)
+# Read an existing image file
+image_path = "path/to/your/image.png"  # Replace with your image path
+image = Image.open(image_path)
 
 # Convert image to bytes buffer
 buffered = BytesIO()
@@ -19,8 +18,8 @@ image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 # Create the dictionary structure
 data = {
     "input": {
-        "x": 10,
-        "y": 20,
+        "x": 100,
+        "y": 100,
         "Image_buffer": image_base64
     }
 }
@@ -30,4 +29,3 @@ with open('test_input.json', 'w') as json_file:
     json.dump(data, json_file, indent=4)
 
 print("test_input.json has been created.")
-

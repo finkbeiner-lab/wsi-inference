@@ -1,3 +1,4 @@
+import os
 import runpod
 import sys
 sys.path.insert(0, '../')
@@ -17,6 +18,9 @@ from typing import List, Dict, Optional, Union
 import base64
 import io
 from PIL import Image
+from huggingface_hub import hf_hub_download
+
+
 
 class NumpyArrayDataset(Dataset):
     def __init__(self, array_dict):
@@ -51,12 +55,24 @@ class NumpyArrayDataset(Dataset):
         return {'tensor': input_tensor, 'array':image_float_np, 'key': key}
 
 class LitMaskRCNN(L.LightningModule):
+    """
+    A PyTorch Lightning implementation of Mask R-CNN for object detection and instance segmentation.
+    This class extends LightningModule to provide training, validation, and testing functionality.
+    """
     def __init__(self, optim_config,backbone,rpn,roi_heads,transform):
+        """
+        Initialize the Mask R-CNN model with its components and configuration.
+        
+        Args:
+            optim_config: Configuration for the optimizer
+            backbone: The backbone network for feature extraction
+            rpn: Region Proposal Network
+            roi_heads: Region of Interest heads for detection and segmentation
+            transform: Image transformation pipeline
+        """
         super().__init__()
-        #self.model_config = _default_mrcnn_config(num_classes=1 + train_config['num_classes']).config
-        #self.model = model
         self.optim_config = optim_config
-        #self.model = build_default(model_config, im_size=1024)
+        # Define loss names and their corresponding weights
         self.loss_names = 'objectness rpn_box_reg classifier box_reg mask'.split()
         self.loss_weights = [1., 4., 1., 4., 1.,]
         self.loss_weights = OrderedDict([(f'loss_{name}', weight) for name, weight in zip(self.loss_names, self.loss_weights)])
@@ -73,25 +89,31 @@ class LitMaskRCNN(L.LightningModule):
 
     @torch.jit.unused
     def eager_outputs(self, losses, detections):
-        # type: (Dict[str, Tensor], List[Dict[str, Tensor]]) -> Union[Dict[str, Tensor], List[Dict[str, Tensor]]]
+        """
+        Return either losses during training or detections during inference.
+        
+        Args:
+            losses: Dictionary of loss values
+            detections: List of detection results
+            
+        Returns:
+            Either losses during training or detections during inference
+        """
         if self.training:
             return losses
-
         return detections
 
     def forward(self, images, targets=None):
-        # type: (List[Tensor], Optional[List[Dict[str, Tensor]]]) -> Tuple[Dict[str, Tensor], List[Dict[str, Tensor]]]
         """
+        Forward pass of the Mask R-CNN model.
+        
         Args:
-            images (list[Tensor]): images to be processed
-            targets (list[Dict[Tensor]]): ground-truth boxes present in the image (optional)
-
+            images: List of input image tensors
+            targets: Optional list of ground truth targets
+            
         Returns:
-            result (list[BoxList] or dict[Tensor]): the output from the model.
-                During training, it returns a dict[Tensor] which contains the losses.
-                During testing, it returns list[BoxList] contains additional fields
-                like `scores`, `labels` and `mask` (for Mask R-CNN models).
-
+            During training: Dictionary of losses
+            During inference: List of detections with scores, labels, and masks
         """
         if self.training and targets is None:
             raise ValueError("In training mode, targets should be passed")
@@ -108,19 +130,17 @@ class LitMaskRCNN(L.LightningModule):
                     raise ValueError("Expected target boxes to be of type "
                                      "Tensor, got {:}.".format(type(boxes)))
 
-        #type hint
+        # Store original image sizes for post-processing
         original_image_sizes: List[Tuple[int, int]] = []
         for img in images:
             val = img.shape[-2:]
             assert len(val) == 2
             original_image_sizes.append((val[0], val[1]))
 
-        #TODO Why Another Transform Here?
+        # Apply image transformations
         images, targets = self.transform(images, targets)
         
-
-        # Check for degenerate boxes
-        # TODO: Move this to a function
+        # Validate bounding boxes
         if targets is not None:
             for target_idx, target in enumerate(targets):
                 boxes = target["boxes"]
@@ -128,33 +148,26 @@ class LitMaskRCNN(L.LightningModule):
                 if degenerate_boxes.any():
                     print(target_idx)
                     print(target["boxes"])
-                    pdb.set_trace()
-                    # print the first degenerate box
                     bb_idx = torch.where(degenerate_boxes.any(dim=1))[0][0]
                     degen_bb: List[float] = boxes[bb_idx].tolist()
                     raise ValueError("All bounding boxes should have positive height and width."
                                      " Found invalid box {} for target at index {}."
                                      .format(degen_bb, target_idx))
 
-        # Image is passed through backbone model
+        # Extract features using backbone
         features = self.backbone(images.tensors)
-        #self.visualize_feature_maps(images, features, show=False)
 
         if isinstance(features, torch.Tensor):
             features = OrderedDict([('0', features)])
 
-        # Features - odict_keys(['0', '1', '2', '3', 'pool'])
-        # targets - dict_keys(['boxes', 'labels', 'masks', 'image_id', 'area'])
-        # images - torch.Size([3, 3, 1024, 1024])
-        # proposals - torch.Size([2000, 4])
+        # Generate region proposals and compute proposal losses
         proposals, proposal_losses = self.rpn(images, features, targets)
-        #self.visualize_rpn_proposals(images, proposals, False)
+        
+        # Generate detections and compute detector losses
         detections, detector_losses = self.roi_heads(features, proposals, images.image_sizes, targets)
         detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)
 
-        #if len(detections)!= 0:
-            #self.visualize_roi_detections(images, detections, 20,False)
-
+        # Combine all losses
         losses = {}
         losses.update(detector_losses)
         losses.update(proposal_losses)
@@ -167,8 +180,17 @@ class LitMaskRCNN(L.LightningModule):
         else:
             return self.eager_outputs(losses, detections)
         
-       
     def get_loss_fn(self, weights, default=0.):
+        """
+        Create a loss computation function with weighted losses.
+        
+        Args:
+            weights: Dictionary of loss weights
+            default: Default weight for losses not in weights dictionary
+            
+        Returns:
+            Function that computes weighted loss and metrics
+        """
         def compute_loss_fn(losses):
             item = lambda k: (k, losses[k].item())
             metrics = OrderedDict(list(map(item, [k for k in weights.keys() if k in losses.keys()] + [k for k in losses.keys() if k not in weights.keys()])))
@@ -177,37 +199,52 @@ class LitMaskRCNN(L.LightningModule):
         return compute_loss_fn
     
     def training_step(self, batch, batch_idx):
-        # training_step defines the train loop.
-        #print(batch)
+        """
+        Training step for the model.
+        
+        Args:
+            batch: Input batch containing images and targets
+            batch_idx: Index of the current batch
+            
+        Returns:
+            Dictionary containing loss and metrics
+        """
         opt = self.optimizers()
         images, targets = batch 
-        #images = [image for image in images]
-        #targets = [dict([(k, v) for k, v in target.items()]) for target in targets]
+       
         opt.zero_grad()
         loss_fn = self.get_loss_fn(self.loss_weights)
         loss, metrics = loss_fn(self.forward(images, targets))
-        
-        #loss.backward()
+    
         self.manual_backward(loss)
         opt.step()
-        #log_metrics.append(dict(epoch=epoch, loss=loss.item(), metrics=metrics))
         print_logs = "batch no : {batch_no}, total loss : {loss},  classifier :{classifier}, mask: {mask} ==================="
         print(print_logs.format( batch_no=batch_idx, loss=loss.item(),  classifier=metrics['loss_classifier'], mask=metrics['loss_mask']))
         self.log("loss", loss.item())
         self.log("metrics-loss_classifier", metrics['loss_classifier'])
         self.log("metrics-loss_mask", metrics['loss_mask'])
       
-        #yield log_metrics
-    
-    #def backward(self, loss):
-    #    loss.backward()
-    
     def configure_optimizers(self):
+        """
+        Configure the optimizer for training.
+        
+        Returns:
+            Configured optimizer
+        """
         optimizer = self.optim_config['cls']([dict(params=list(self.parameters()))], **self.optim_config['defaults'])
         return optimizer
 
-    
     def get_outputs(self, outputs, threshold):
+        """
+        Process model outputs to extract masks, labels, and boxes above threshold.
+        
+        Args:
+            outputs: Raw model outputs
+            threshold: Confidence threshold for filtering predictions
+            
+        Returns:
+            Tuple of (mask_list, label_list) containing filtered predictions
+        """
         mask_list = []
         label_list = []
         class_names = ['Cored', 'Diffuse', 'Coarse-Grained', 'CAA']
@@ -217,8 +254,6 @@ class LitMaskRCNN(L.LightningModule):
             scores = [scores[x] for x in thresholded_preds_inidices]
             # get the masks
             masks = (outputs[j]['masks']>0.5).squeeze()
-            # print("masks", masks)
-            # discard masks for objects which are below threshold
             masks = [masks[x] for x in thresholded_preds_inidices]
             # get the bounding boxes, in (x1, y1), (x2, y2) format
             boxes = [[(int(i[0]), int(i[1])), (int(i[2]), int(i[3]))]  for i in outputs[j]['boxes'].tolist()]
@@ -232,23 +267,61 @@ class LitMaskRCNN(L.LightningModule):
         return mask_list, label_list
 
     def match_label(self, pred_label, gt_label):
+        """
+        Compare predicted and ground truth labels.
+        
+        Args:
+            pred_label: Predicted label
+            gt_label: Ground truth label
+            
+        Returns:
+            1 if labels match, 0 otherwise
+        """
         if pred_label==gt_label:
             return 1
         else:
             return 0
     
     def actual_label_target(self, gt_label):
+        """
+        Return the ground truth label as is.
+        
+        Args:
+            gt_label: Ground truth label
+            
+        Returns:
+            The ground truth label
+        """
         return gt_label
     
-    
     def compute_iou(self, mask1, mask2):
+        """
+        Compute Intersection over Union (IoU) between two masks.
+        
+        Args:
+            mask1: First mask
+            mask2: Second mask
+            
+        Returns:
+            IoU score between the masks
+        """
         intersection = torch.logical_and(mask1, mask2).sum().item()
         union = torch.logical_or(mask1, mask2).sum().item()
         iou = (2*intersection) / union if union != 0 else 0
         return iou
     
-    
     def evaluate_metrics(self, target,masks, labels):
+        """
+        Evaluate model performance metrics.
+        
+        Args:
+            target: Ground truth targets
+            masks: Predicted masks
+            labels: Predicted labels
+            
+        Returns:
+            Tuple of (mean_f1_score, mean_matched_label) containing evaluation metrics
+        """
         f1_score_list=[]
         matched_label_list=[]
         mean_f1_score = -1
@@ -268,24 +341,25 @@ class LitMaskRCNN(L.LightningModule):
                                 f1_score_list.append(f1_score)
                                 matched_label = self.match_label(labels[j][k],target_labels[l])
                                 matched_label_list.append(matched_label)
-                            #else:
-                            #    matched_label_list.append(0)
             if len(f1_score_list)>0:
                 mean_f1_score=np.nansum(f1_score_list)/len(f1_score_list)
             if len(matched_label_list)>0:
                 mean_matched_label = sum(matched_label_list)/len(matched_label_list)
-            #print(f1_score_list, matched_label_list)
             return mean_f1_score, mean_matched_label
 
-    
     def validation_step(self, batch, batch_idx):
-        # this is the validation loop
+        """
+        Validation step for the model.
+        
+        Args:
+            batch: Input batch containing images and targets
+            batch_idx: Index of the current batch
+            
+        Returns:
+            Tuple of (f1_mean, labels_matched) containing validation metrics
+        """
         images, targets = batch 
-        #images = [image for image in batch[0]]
-        #targets = [dict([(k, v) for k, v in target.items()]) for target in batch[1]]
-        #loss_fn = self.get_loss_fn(self.loss_weights)
         outputs = self.forward(images, targets)
-        #print(outputs)
         masks, labels = self.get_outputs(outputs, 0.50)
         f1_mean, labels_matched =  self.evaluate_metrics(targets, masks, labels)
         self.avg_segmentation_overlap = f1_mean
@@ -295,30 +369,40 @@ class LitMaskRCNN(L.LightningModule):
         self.log('avg_seg_overlap',f1_mean)
         self.log('val_acc', labels_matched)
         return f1_mean, labels_matched
-        #outputs1 = [x for x in outputs if len(x["labels"])!=0]
-        #if len(outputs1)>0:
-        #    print(outputs1[0].keys())
-        #loss, metrics = loss_fn(outputs1[0])
-        #loss, metrics = loss_fn(self.forward(images, targets))
-        #print_logs = "batch no : {batch_no}, total loss : {loss},  classifier :{classifier}, mask: {mask} ==================="
-        #print(print_logs.format( batch_no=batch_idx, loss=loss.item(),  classifier=metrics['loss_classifier'], mask=metrics['loss_mask']))
-        
-    
+       
     def test_step(self, batch, batch_idx):
-        # this is the validation loop
+        """
+        Test step for the model.
+        
+        Args:
+            batch: Input batch containing images and targets
+            batch_idx: Index of the current batch
+            
+        Returns:
+            Tuple of (f1_mean, labels_matched) containing test metrics
+        """
         images, targets = batch 
-        #images = [image for image in batch[0]]
-        #targets = [dict([(k, v) for k, v in target.items()]) for target in batch[1]]
-        #loss_fn = self.get_loss_fn(self.loss_weights)
-        #loss, metrics = loss_fn(self.forward(images, targets))
         outputs = self.forward(images)
         masks, labels = self.get_outputs(outputs, 0.25)
         f1_mean, labels_matched =  self.evaluate_metrics(targets, masks, labels)
         return f1_mean, labels_matched
 
 class ExplainPredictions():
-    # TODO fix the visualization flags
+    """
+    Class for explaining and visualizing predictions from the Mask R-CNN model.
+    Handles image processing, prediction visualization, and quantitative analysis of predictions.
+    """
     def __init__(self, model, x, y, image_buffer, detection_threshold):
+        """
+        Initialize the explanation system with model and configuration.
+        
+        Args:
+            model: Trained Mask R-CNN model
+            x: X-coordinate offset for image processing
+            y: Y-coordinate offset for image processing
+            image_buffer: Input image data
+            detection_threshold: Confidence threshold for detections
+        """
         self.model = model
         self.x = x
         self.y = y
@@ -326,15 +410,21 @@ class ExplainPredictions():
         self.detection_threshold = detection_threshold
         self.class_names = ['Cored', 'Diffuse', 'Coarse-Grained', 'CAA']
         self.class_to_colors = {'Cored': (255, 0, 0), 'Diffuse' : (0, 0, 255), 'Coarse-Grained': (0,255,0), 'CAA':(225, 255, 0)}
-        #self.result_save_dir= os.path.join( "/home/mahirwar/Desktop/Monika/npsad_data/vivek/reports/New-Minerva-Data-output", self.model_input_path.split("/")[-1])
         self.colors = np.random.uniform(0, 255, size=(len(self.class_names), 3))
         self.column_names = ["image_name", "region", "region_mask", "label", 
                             "confidence", "brown_pixels", "centroid", 
                             "eccentricity", "area", "equivalent_diameter","mask_present"]
 
-    
     def prepare_input(self, image):
-    
+        """
+        Prepare input image for model inference.
+        
+        Args:
+            image: Input image array
+            
+        Returns:
+            Tuple of (input_tensor, normalized_image) ready for model input
+        """
         image_float_np = np.float32(image) / 255
         # define the torchvision image transforms
         transform = torchvision.transforms.Compose([
@@ -349,6 +439,18 @@ class ExplainPredictions():
         return input_tensor, image_float_np
 
     def draw_segmentation_map(self, image, masks, boxes, labels):
+        """
+        Create a segmentation map visualization from model predictions.
+        
+        Args:
+            image: Original image
+            masks: Predicted segmentation masks
+            boxes: Bounding boxes
+            labels: Class labels
+            
+        Returns:
+            Binary mask image showing all detected regions
+        """
         alpha = 1
         beta = 0.6
         gamma = 0
@@ -363,11 +465,22 @@ class ExplainPredictions():
         return result_masks
 
     def get_outputs_nms(self, input_tensor,image,img_name,  score_threshold = 0.5, iou_threshold = 0.5):
-        #start=timer()
+        """
+        Get model predictions with non-maximum suppression.
+        
+        Args:
+            input_tensor: Preprocessed input tensor
+            image: Original image
+            img_name: Name of the image
+            score_threshold: Minimum confidence score for detections
+            iou_threshold: IoU threshold for non-maximum suppression
+            
+        Returns:
+            DataFrame containing detection results and metrics
+        """
         with torch.no_grad():
             # forward pass of the image through the model
             outputs = self.model(input_tensor)
-        #print(timer()-start)
         r= []
         for j in range(len(outputs)):
             boxes = outputs[j]['boxes']
@@ -388,12 +501,25 @@ class ExplainPredictions():
             result_masks = self.draw_segmentation_map(image[j], masks, boxes, labels)
             total_brown_pixels = self.get_brown_pixel_cnt(image[j], img_name[j])
             df = self.quantify_plaques(pd.DataFrame(), img_name[j], result_masks, boxes, labels, scores, total_brown_pixels)
-            #print(df)
             r.append(df)
         return pd.concat(r, ignore_index=True)
     
     def quantify_plaques(self, df, img_name, result_masks, boxes, labels, scores, total_brown_pixels):
-        '''This function takes masks image and generates attributes like plaque count, area, and eccentricity'''
+        """
+        Quantify and analyze detected plaques.
+        
+        Args:
+            df: DataFrame to store results
+            img_name: Name of the image
+            result_masks: Segmentation masks
+            boxes: Bounding boxes
+            labels: Class labels
+            scores: Confidence scores
+            total_brown_pixels: Count of brown pixels in image
+            
+        Returns:
+            DataFrame containing plaque measurements and statistics
+        """
         plaque_counts = {
             "Cored": 0,
             "Coarse-Grained": 0,
@@ -416,14 +542,10 @@ class ExplainPredictions():
             regions = regionprops(closing)
             mask_present = 1 if 0 in np.unique(closing) else 0
             
-            #qupath_coord_x = self.x +img_x +  (y1 + y2)//2
-            
-            qupath_coord_x1 = self.x +img_x +  y1
-            qupath_coord_x2 = self.x +img_x +  y2
-            qupath_coord_y1 = self.y + img_y + x1
-            qupath_coord_y2 = self.y + img_y + x2
-            
-            #qupath_coord_y = self.y + img_y + (x1 + x2)//2
+            qupath_coord_x1 = self.x + int(img_x) + y1
+            qupath_coord_x2 = self.x + int(img_x) + y2
+            qupath_coord_y1 = self.y + int(img_y) + x1
+            qupath_coord_y2 = self.y + int(img_y)  + x2
 
             for props in regions:
                 plaque_counts[label] += 1
@@ -436,8 +558,17 @@ class ExplainPredictions():
 
         return df
     
-    
     def get_brown_pixel_cnt(self, img, img_name):
+        """
+        Count brown pixels in the image using HED color space.
+        
+        Args:
+            img: Input image
+            img_name: Name of the image
+            
+        Returns:
+            Count of brown pixels in the image
+        """
         # Separate the stains from the IHC image
         ihc_hed = rgb2hed(img)
 
@@ -455,17 +586,43 @@ class ExplainPredictions():
         return brown_pixel_count
 
     def create_dataloader(self, arrays, batch_size=1, shuffle=False, num_workers=0):
+        """
+        Create a DataLoader for processing image arrays.
+        
+        Args:
+            arrays: List of image arrays
+            batch_size: Size of each batch
+            shuffle: Whether to shuffle the data
+            num_workers: Number of worker processes
+            
+        Returns:
+            DataLoader for the input arrays
+        """
         dataset = NumpyArrayDataset(arrays)
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
         return dataloader
 
     def process_tile(self, batch):
+        """
+        Process a single image tile through the model.
+        
+        Args:
+            batch: Batch containing image data
+            
+        Returns:
+            DataFrame containing detection results for the tile
+        """
         img_name, input_tensor, image = batch["key"],batch["tensor"],batch["array"]
         df = self.get_outputs_nms(input_tensor,image,img_name, score_threshold = 0.6, iou_threshold = 0.5)
         return df
 
-    
     def generate_results_mpp(self):
+        """
+        Generate results for the entire image by processing it in tiles.
+        
+        Returns:
+            DataFrame containing detection results for the entire image
+        """
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model.eval().to(device)
         
@@ -479,8 +636,8 @@ class ExplainPredictions():
             raise ValueError(f"Invalid image shape: {image.shape}. Expected 3 dimensions.")
         
         height, width, channels = image.shape 
-        if height != 3072 or width != 3072:
-            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 3072x3072.")
+        if height != 1024 or width != 1024:
+            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 1024x1024.")
         
         # Tile size
         tile_size = 1024
@@ -510,27 +667,39 @@ class ExplainPredictions():
             final_df = pd.DataFrame(columns=self.column_names)
         return final_df
 
-import base64
-import io
-from PIL import Image
 
 def process_image(job):
+    """
+    Process an input image through the Mask R-CNN model and return detection results.
+    This is the main entry point for the inference service.
+    
+    Args:
+        job: Dictionary containing:
+            - input: Dictionary with:
+                - x: X-coordinate offset
+                - y: Y-coordinate offset
+                - Image_buffer: Base64 encoded image data
+                
+    Returns:
+        JSON string containing detection results or error message if processing fails
+    """
     try:
+        # Extract input parameters from job
         job_input = job["input"]
         x = job_input["x"]
         y = job_input["y"]
         image_buffer = job_input["Image_buffer"]
         
-        # Add error checking for Image_buffer
+        # Validate input image buffer
         if not image_buffer:
             raise ValueError("image_buffer is empty")
         
-        # Decode base64 image_buffer
+        # Decode base64 image data and convert to numpy array
         decoded_image = base64.b64decode(image_buffer)
         image = Image.open(io.BytesIO(decoded_image))
         image_buffer = np.array(image)
         
-        # Add error checking for decoded image
+        # Validate decoded image
         if image_buffer.size == 0:
             raise ValueError("Decoded Image buffer is empty")
         
@@ -538,38 +707,26 @@ def process_image(job):
             raise ValueError(f"Invalid image shape: {image_buffer.shape}. Expected 3 dimensions.")
         
         height, width, channels = image_buffer.shape 
-        if height != 3072 or width != 3072:
-            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 3072x3072.")
+        if height != 1024 or width != 1024:
+            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 1024x1024.")
         
-        model_name = "/workspace/Projects/Amyb_plaque_detection/models/yp2mf3i8_epoch=108-step=872.ckpt"
-        #model_name = "/gladstone/finkbeiner/steve/work/data/npsad_data/vivek/runpod_mrcnn_models/yp2mf3i8_epoch=108-step=872.ckpt"
-        model = LitMaskRCNN.load_from_checkpoint(model_name)
+        # Download model checkpoint from Hugging Face
+        ckpt_path = hf_hub_download(repo_id="vivekgr92/amyb-detection", filename="amyb-detection.ckpt")
         
+        # Load model from checkpoint
+        model = LitMaskRCNN.load_from_checkpoint(ckpt_path)
+        
+        # Initialize explanation system and generate results
         explain = ExplainPredictions(model, x, y, image_buffer, detection_threshold=0.6)
         final_df = explain.generate_results_mpp()
         
-        # Convert DataFrame to dictionary for JSON serialization
+        # Convert results to JSON format
         result = final_df.to_json(orient='records')
         
         return result
+    
     except Exception as e:
-        import traceback
-        error_message = f"Error in process_image: {str(e)}\n{traceback.format_exc()}"
-        return {"error": error_message}
-        if height != 3072 or width != 3072:
-            raise ValueError(f"Invalid image dimensions: {height}x{width}. Expected 3072x3072.")
-
-        model_name = "/gladstone/finkbeiner/steve/work/data/npsad_data/vivek/runpod_mrcnn_models/yp2mf3i8_epoch=108-step=872.ckpt" 
-        model = LitMaskRCNN.load_from_checkpoint(model_name)
-        
-        explain = ExplainPredictions(model, x, y, image_buffer, detection_threshold=0.6)
-        final_df = explain.generate_results_mpp()
-        
-        # Convert DataFrame to dictionary for JSON serialization
-        result = final_df.to_json(orient='records')
-        
-        return result
-    except Exception as e:
+        # Handle any errors during processing
         import traceback
         error_message = f"Error in process_image: {str(e)}\n{traceback.format_exc()}"
         return {"error": error_message}
